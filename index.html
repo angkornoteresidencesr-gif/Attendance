@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Staff Attendance Kiosk</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #111827);
+    --hint: var(--tg-theme-hint-color, #6b7280);
+    --card: var(--tg-theme-secondary-bg-color, #f3f4f6);
+    --btn: var(--tg-theme-button-color, #2563eb);
+    --btn-text: var(--tg-theme-button-text-color, #ffffff);
+    --ok: #16a34a;
+    --late: #dc2626;
+    --warn: #d97706;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  main { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 18px; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+  .wrap { width: 100%; max-width: 480px; }
+
+  /* Home screen */
+  .clock { font-size: 56px; font-weight: 700; text-align: center; letter-spacing: -1px; line-height: 1.05; }
+  .date { text-align: center; color: var(--hint); font-size: 16px; margin: 6px 0 22px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .act { min-height: 120px; border: 0; border-radius: 20px; color: #fff; font-size: 22px; font-weight: 700;
+    cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+  .act small { font-size: 13px; font-weight: 500; opacity: .9; }
+  .act:active { transform: scale(.97); opacity: .9; }
+  .act.in { background: #16a34a; }
+  .act.bo { background: #ea580c; }
+  .act.bi { background: #0d9488; }
+  .act.out { background: #dc2626; }
+  .off { text-align: center; color: var(--hint); font-size: 14px; margin-top: 18px; min-height: 18px; }
+  .link { display: block; text-align: center; color: var(--btn); font-size: 14px; margin-top: 14px; cursor: pointer;
+    background: none; border: 0; width: 100%; padding: 8px; }
+  .manual { margin-top: 6px; text-align: center; }
+  .manual input { width: 100%; padding: 14px; font-size: 18px; text-align: center; border-radius: 12px; text-transform: uppercase;
+    border: 1px solid rgba(127,127,127,.35); background: var(--card); color: var(--text); }
+  .manual p { color: var(--hint); font-size: 13px; margin: 8px 0 0; }
+
+  /* Result card */
+  .card { width: 100%; background: var(--card); border-radius: 20px; padding: 28px 22px; text-align: center; }
+  .icon { font-size: 60px; line-height: 1; margin-bottom: 12px; }
+  .icon.spin { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.12); opacity: .6; } }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  p.sub { margin: 0 0 18px; color: var(--hint); font-size: 16px; line-height: 1.45; white-space: pre-line; }
+  .rows { margin: 0 0 18px; text-align: left; border-radius: 12px; background: var(--bg); overflow: hidden; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; font-size: 15px;
+    border-bottom: 1px solid rgba(127,127,127,.18); }
+  .row:last-child { border-bottom: 0; }
+  .row .k { color: var(--hint); }
+  .row .v { font-weight: 600; text-align: right; word-break: break-word; user-select: text; }
+  .tone-ok h1 { color: var(--ok); }
+  .tone-late h1, .tone-error h1 { color: var(--late); }
+  .tone-warn h1 { color: var(--warn); }
+  button.main { width: 100%; border: 0; border-radius: 14px; padding: 16px; font-size: 17px; font-weight: 600;
+    background: var(--btn); color: var(--btn-text); cursor: pointer; }
+  button.main:active { opacity: .85; }
+  pre.debug { margin: 0 0 16px; padding: 10px 12px; text-align: left; font-size: 12px; line-height: 1.4;
+    white-space: pre-wrap; word-break: break-word; background: var(--bg); color: var(--hint);
+    border-radius: 10px; user-select: text; }
+  .status { width: 100%; max-width: 480px; margin-top: 14px; font-size: 12px; line-height: 1.4; text-align: center;
+    color: var(--hint); word-break: break-word; }
+  .status.good { color: var(--ok); }
+  .status.bad { color: var(--late); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="wrap">
+
+    <!-- HOME -->
+    <section id="home" hidden>
+      <div class="clock" id="clock">--:--</div>
+      <div class="date" id="date"></div>
+      <div class="grid">
+        <button class="act in"  data-session="Check-In">🟢 Check In<small>Start of day</small></button>
+        <button class="act bo"  data-session="Break Out">🟠 Break Out<small>Going on break</small></button>
+        <button class="act bi"  data-session="Break In">🟢 Break In<small>Back from break</small></button>
+        <button class="act out" data-session="Check-Out">🔴 Check Out<small>End of day</small></button>
+      </div>
+      <div class="off" id="offLine"></div>
+      <button class="link" id="manualLink">Can't scan? Type the staff code instead</button>
+      <div class="manual" id="manualBox" hidden>
+        <input id="code" type="text" autocomplete="off" autocapitalize="characters" placeholder="STF-XXXXXXXX">
+        <p>Type the code, then tap one of the four buttons above.</p>
+      </div>
+    </section>
+
+    <!-- RESULT / MESSAGE CARD -->
+    <section class="card" id="card" hidden>
+      <div class="icon" id="icon">📍</div>
+      <h1 id="title"></h1>
+      <p class="sub" id="text"></p>
+      <div class="rows" id="rows" hidden></div>
+      <pre class="debug" id="debug" hidden></pre>
+      <button class="main" id="btn" hidden></button>
+    </section>
+
+  </div>
+  <div class="status" id="status" hidden></div>
+</main>
+
+<script>
+/* ======================== SETTINGS (edit these) ======================== */
+const API_URL = 'https://script.google.com/macros/s/AKfycbzCAaqQ1NR-kSHnt8Vs0_EkkU-63EWb_6sVANYYuHuQOgcxptDpojx2JixrbxUi6Ta2bQ/exec';  // full URL ending in /exec
+const DEBUG = true;            // true = show technical details on errors. Set to false when everything works.
+const PAGE_VERSION = 'v5';     // shown in the footer so you can confirm the new page loaded
+const API_TIMEOUT_MS = 30000;  // how long to wait for the server (the first call can be slow)
+const RETURN_OK_MS = 6000;     // success screen goes back to the home screen after this many ms
+const RETURN_ERR_MS = 9000;    // message screens go back after this many ms
+const GOOD_ACCURACY_M = 25;    // (only if the sheet says Require Location = YES)
+const GPS_WAIT_MS = 15000;
+/* ======================================================================== */
+
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+const $ = function (id) { return document.getElementById(id); };
+const ACTIONS = { 'Check-In': 'Check In', 'Break Out': 'Break Out', 'Break In': 'Break In', 'Check-Out': 'Check Out' };
+
+let busy = false;
+let cfg = { requireLocation: false };
+let handler = null;
+let returnTimer = null;
+
+/* ------------------------------ Clock (12-hour, Phnom Penh) ------------------------------ */
+const timeFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Phnom_Penh', hour: 'numeric', minute: '2-digit', hour12: true });
+const dateFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Phnom_Penh', weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+function tick() {
+  const d = new Date();
+  $('clock').textContent = timeFmt.format(d);
+  $('date').textContent = dateFmt.format(d);
+}
+setInterval(tick, 1000);
+tick();
+
+/* ------------------------------ Screens ------------------------------ */
+function showHome() {
+  clearTimeout(returnTimer);
+  handler = null;
+  $('card').hidden = true;
+  $('home').hidden = false;
+}
+
+/** Shows the message card. o.home = ms until it returns to the home screen automatically. */
+function showCard(o) {
+  clearTimeout(returnTimer);
+  $('home').hidden = true;
+  $('card').hidden = false;
+
+  $('icon').textContent = o.icon || '📍';
+  $('icon').className = 'icon' + (o.spin ? ' spin' : '');
+  $('title').textContent = o.title || '';
+  $('text').textContent = o.text || '';
+  $('card').className = 'card' + (o.tone ? ' tone-' + o.tone : '');
+
+  const rowsEl = $('rows');
+  rowsEl.innerHTML = '';
+  if (o.rows && o.rows.length) {
+    o.rows.forEach(function (r) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const k = document.createElement('span'); k.className = 'k'; k.textContent = r[0];
+      const v = document.createElement('span'); v.className = 'v'; v.textContent = r[1];
+      row.appendChild(k); row.appendChild(v);
+      rowsEl.appendChild(row);
+    });
+    rowsEl.hidden = false;
+  } else {
+    rowsEl.hidden = true;
+  }
+
+  const dbg = $('debug');
+  if (o.debug && DEBUG) { dbg.textContent = o.debug; dbg.hidden = false; } else { dbg.hidden = true; }
+
+  const btn = $('btn');
+  btn.hidden = !o.button;
+  btn.textContent = o.button || '';
+  handler = o.onClick || null;
+
+  if (o.home) returnTimer = setTimeout(showHome, o.home);
+}
+
+$('btn').addEventListener('click', function () { if (handler) handler(); });
+
+function setStatus(ok, text) {
+  if (!DEBUG) return;
+  const el = $('status');
+  el.hidden = false;
+  el.className = 'status ' + (ok ? 'good' : 'bad');
+  el.textContent = text;
+}
+
+function shortUrl() {
+  const u = API_URL.replace(/^https?:\/\//, '');
+  return u.length > 46 ? u.slice(0, 28) + '…' + u.slice(-14) : u;
+}
+
+function haptic(type) {
+  try { if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred(type); } catch (e) {}
+}
+
+/* ------------------------- Talking to Apps Script ------------------------- */
+function apiError(kind, message) {
+  const e = new Error(message);
+  e.kind = kind;
+  return e;
+}
+
+async function callApi(payload) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(function () { ctrl.abort(); }, API_TIMEOUT_MS);
+  let raw;
+  try {
+    // No custom headers on purpose: keeps it a "simple" request so the browser does not block it (CORS).
+    const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload), signal: ctrl.signal });
+    raw = await res.text();
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw apiError('TIMEOUT', 'No answer from the server after ' + (API_TIMEOUT_MS / 1000) + ' seconds.');
+    throw apiError('NETWORK', 'Request blocked or server unreachable (' + (e && e.message ? e.message : e) + ').');
+  } finally {
+    clearTimeout(timer);
+  }
+  let data;
+  try { data = JSON.parse(raw); }
+  catch (e) { throw apiError('BAD_REPLY', 'Server did not return data. It replied: ' + raw.replace(/\s+/g, ' ').slice(0, 160)); }
+  if (!data || typeof data !== 'object') throw apiError('BAD_REPLY', 'Unexpected reply from server.');
+  return data;
+}
+
+function showApiError(err, retry) {
+  haptic('error');
+  let text;
+  if (err.kind === 'TIMEOUT') text = 'The server took too long to answer. Check the internet and try again.';
+  else if (err.kind === 'BAD_REPLY') text = 'The server sent an unexpected reply. The manager needs to deploy a new version of the Apps Script.';
+  else text = 'Could not reach the server. Check the internet and try again.';
+  setStatus(false, 'Page ' + PAGE_VERSION + ' · Server NOT reachable ❌ — ' + err.message);
+  showCard({
+    icon: '📶', tone: 'warn', title: 'Connection problem', text: text,
+    button: retry ? 'Try Again' : 'OK', onClick: retry || showHome, home: retry ? 0 : RETURN_ERR_MS,
+    debug: (err.message || String(err)) + '\nAPI: ' + shortUrl() + '\nPage ' + PAGE_VERSION
+  });
+}
+
+/* ---------------- GPS (only used when the sheet says Require Location = YES) ---------------- */
+function getTelegramLocation() {
+  return new Promise(function (resolve) {
+    const lm = tg && tg.LocationManager;
+    if (!lm || !tg.isVersionAtLeast || !tg.isVersionAtLeast('8.0')) return resolve(null);
+    let done = false;
+    function finish(v) { if (!done) { done = true; resolve(v); } }
+    setTimeout(function () { finish(null); }, 25000);
+    function request() {
+      if (!lm.isLocationAvailable) return finish(null);
+      lm.getLocation(function (loc) {
+        if (!loc) return finish(null);
+        finish({ lat: loc.latitude, lng: loc.longitude, accuracy: loc.horizontal_accuracy || null });
+      });
+    }
+    if (lm.isInited) request(); else lm.init(request);
+  });
+}
+
+function getBrowserLocation() {
+  return new Promise(function (resolve, reject) {
+    if (!navigator.geolocation) return reject({ code: 0 });
+    let best = null, settled = false, watchId, timer;
+    function finish() {
+      if (settled) return;
+      settled = true;
+      navigator.geolocation.clearWatch(watchId);
+      clearTimeout(timer);
+      if (best) resolve(best); else reject({ code: 3 });
+    }
+    timer = setTimeout(finish, GPS_WAIT_MS);
+    watchId = navigator.geolocation.watchPosition(
+      function (pos) {
+        const c = pos.coords;
+        const fix = { lat: c.latitude, lng: c.longitude, accuracy: c.accuracy };
+        if (!best || fix.accuracy < best.accuracy) best = fix;
+        if (fix.accuracy <= GOOD_ACCURACY_M) finish();
+      },
+      function (err) {
+        if (best) return finish();
+        settled = true;
+        navigator.geolocation.clearWatch(watchId);
+        clearTimeout(timer);
+        reject(err);
+      },
+      { enableHighAccuracy: true, timeout: GPS_WAIT_MS, maximumAge: 0 }
+    );
+  });
+}
+
+async function getPosition() {
+  const viaTelegram = await getTelegramLocation();
+  if (viaTelegram) return viaTelegram;
+  return getBrowserLocation();
+}
+
+function showLocationError(err) {
+  haptic('error');
+  const denied = err && err.code === 1;
+  showCard({
+    icon: denied ? '🔒' : '📡', tone: 'warn',
+    title: denied ? 'Location permission needed' : 'Could not get the location',
+    text: denied
+      ? 'Allow location for Telegram on this device (Settings > Telegram > Location), then try again.'
+      : 'Make sure Location is switched on for this device, then try again.',
+    button: 'OK', onClick: showHome, home: RETURN_ERR_MS
+  });
+}
+
+/* ------------------------------ Scanning ------------------------------ */
+function startAction(session) {
+  if (busy) return;
+  const typed = $('code').value.trim();
+  if (!$('manualBox').hidden && typed) {
+    $('code').value = '';
+    processCode(typed, session);
+    return;
+  }
+  openScanner(session);
+}
+
+function scannerUnsupported() {
+  showCard({
+    icon: '📷', tone: 'warn', title: 'QR scanner not available',
+    text: 'This device cannot open the Telegram QR scanner. Use a phone or tablet with the latest Telegram app, ' +
+          'or type the staff code (link on the home screen).',
+    button: 'OK', onClick: showHome, home: RETURN_ERR_MS
+  });
+}
+
+function openScanner(session) {
+  if (!tg || typeof tg.showScanQrPopup !== 'function' || !tg.isVersionAtLeast || !tg.isVersionAtLeast('6.4')) {
+    return scannerUnsupported();
+  }
+  let handled = false;
+  try {
+    tg.showScanQrPopup({ text: ACTIONS[session] + ' - scan your staff badge' }, function (text) {
+      if (handled) return true;
+      handled = true;
+      setTimeout(function () { processCode(text, session); }, 80);
+      return true;                       // true = close the scanner
+    });
+  } catch (e) {
+    scannerUnsupported();
+  }
+}
+
+async function processCode(text, session) {
+  if (busy) return;
+  busy = true;
+  showCard({ icon: '⏳', spin: true, title: 'Checking badge…', text: ACTIONS[session] });
+
+  let pos = null;
+  if (cfg.requireLocation) {
+    try { pos = await getPosition(); }
+    catch (err) { busy = false; return showLocationError(err); }
+  }
+
+  try {
+    const res = await callApi({
+      action: 'scan',
+      initData: tg.initData,
+      session: session,
+      code: String(text || '').trim(),
+      lat: pos ? pos.lat : null,
+      lng: pos ? pos.lng : null,
+      accuracy: pos ? pos.accuracy : null
+    });
+    busy = false;
+    showScanResult(res);
+  } catch (err) {
+    busy = false;
+    showApiError(err, null);
+  }
+}
+
+function showScanResult(res) {
+  if (res.ok) {
+    const e = res.entry;
+    haptic(e.tone === 'late' ? 'warning' : 'success');
+    showCard({
+      icon: e.tone === 'late' ? '⏰' : (e.tone === 'warn' ? '🟠' : '✅'),
+      tone: e.tone,
+      title: e.name,
+      text: e.card + ' recorded at ' + e.time + (e.warning ? '\n⚠️ ' + e.warning : ''),
+      rows: [['Position', e.position || '-'], ['Status', e.status + (e.note ? ' (' + e.note + ')' : '')], ['Time', e.time]],
+      button: 'OK', onClick: showHome, home: RETURN_OK_MS
+    });
+    return;
+  }
+
+  haptic('error');
+  switch (res.code) {
+    case 'NOT_FOUND':
+      showCard({ icon: '❌', tone: 'error', title: 'Badge not recognized', text: res.message,
+                 button: 'OK', onClick: showHome, home: RETURN_ERR_MS });
+      break;
+    case 'OFF_TODAY':
+      showCard({ icon: '🌴', tone: 'warn', title: 'Day off today', text: res.message,
+                 rows: [['Name', res.name || '-']], button: 'OK', onClick: showHome, home: RETURN_ERR_MS });
+      break;
+    case 'ALREADY_RECORDED':
+      showCard({ icon: 'ℹ️', title: 'Already recorded', text: res.message,
+                 rows: [['Name', res.name], ['Action', res.session], ['Time', res.time], ['Status', res.status]],
+                 button: 'OK', onClick: showHome, home: RETURN_ERR_MS });
+      break;
+    case 'TOO_SOON':
+      showCard({ icon: '⏱️', tone: 'warn', title: 'Please wait a moment', text: res.message,
+                 button: 'OK', onClick: showHome, home: RETURN_ERR_MS });
+      break;
+    case 'INACTIVE':
+      showCard({ icon: '🚫', tone: 'error', title: 'Account inactive', text: res.message,
+                 button: 'OK', onClick: showHome, home: RETURN_ERR_MS });
+      break;
+    case 'OUT_OF_BOUNDS':
+      showCard({ icon: '❌', tone: 'error', title: 'Out of range', text: res.message,
+                 rows: [['Distance', res.distance + ' m'], ['Allowed', res.radius + ' m']],
+                 button: 'OK', onClick: showHome, home: RETURN_ERR_MS });
+      break;
+    case 'LOW_ACCURACY':
+      showCard({ icon: '📡', tone: 'warn', title: 'GPS signal too weak', text: res.message,
+                 button: 'OK', onClick: showHome, home: RETURN_ERR_MS });
+      break;
+    case 'NOT_AUTHORIZED':
+      showNotAuthorized(res);
+      break;
+    case 'AUTH_FAILED':
+    case 'SESSION_EXPIRED':
+      showCard({ icon: '🔄', tone: 'warn', title: 'Please reopen the app', text: res.message, debug: res.code });
+      break;
+    default:
+      showCard({ icon: '⚠️', tone: 'error', title: 'Something went wrong', text: res.message || 'Please try again.',
+                 debug: res.code || '', button: 'OK', onClick: showHome, home: RETURN_ERR_MS });
+  }
+}
+
+function showNotAuthorized(res) {
+  showCard({
+    icon: '🔧', tone: 'warn', title: 'Kiosk not set up yet',
+    text: 'Copy this Telegram ID into the Settings tab of the attendance sheet (row "Kiosk Telegram User ID(s)"), then tap Check Again.',
+    rows: [['This Telegram ID', String(res.userId)]],
+    button: 'Check Again', onClick: function () { loadState(false); }
+  });
+}
+
+/* ------------------------------ State & start ------------------------------ */
+async function loadState(quiet) {
+  if (!quiet) showCard({ icon: '⏳', spin: true, title: 'Loading…', text: 'Connecting to the attendance sheet.' });
+  try {
+    const res = await callApi({ action: 'state', initData: tg.initData });
+    setStatus(true, 'Page ' + PAGE_VERSION + ' · Server connected ✅');
+    if (res.ok) {
+      cfg = res.state;
+      const off = res.state.offToday || [];
+      $('offLine').textContent = off.length ? '🌴 Off today: ' + off.join(', ') : '';
+      if (!quiet || !$('home').hidden) showHome();
+      return;
+    }
+    if (quiet) return;
+    if (res.code === 'NOT_AUTHORIZED') return showNotAuthorized(res);
+    showCard({ icon: '🔄', tone: 'warn', title: 'Please reopen the app', text: res.message || 'Please try again.',
+               debug: res.code || '', button: 'Try Again', onClick: function () { loadState(false); } });
+  } catch (err) {
+    if (!quiet) showApiError(err, function () { loadState(false); });
+  }
+}
+
+document.querySelectorAll('.act').forEach(function (b) {
+  b.addEventListener('click', function () { startAction(b.getAttribute('data-session')); });
+});
+$('manualLink').addEventListener('click', function () {
+  const box = $('manualBox');
+  box.hidden = !box.hidden;
+  if (!box.hidden) $('code').focus();
+});
+
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') keepAwake(); });
+
+(function init() {
+  if (!tg || !tg.initData) {
+    showCard({ icon: '📵', tone: 'warn', title: 'Open from Telegram',
+      text: 'This page only works inside Telegram. Open it from the attendance bot link.' });
+    return;
+  }
+  if (API_URL.indexOf('https://script.google.com/') !== 0) {
+    showCard({ icon: '🛠️', tone: 'error', title: 'Not configured',
+      text: 'API_URL at the top of index.html must be your Apps Script Web App URL (starting with https://script.google.com/ and ending in /exec).' });
+    return;
+  }
+  keepAwake();
+  loadState(false);
+  setInterval(function () { if (!busy && !$('home').hidden) loadState(true); }, 20 * 60 * 1000); // keep date + off list fresh
+})();
+</script>
+</body>
+</html>
